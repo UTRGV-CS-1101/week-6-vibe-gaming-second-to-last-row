@@ -1,0 +1,8 @@
+Add an extra life tablet
+
+Make the red dots fade in instead of instantly spawning
+
+Add an achievement bar on the right side 
+
+Add a shield powerup that protects from one dot 
+
