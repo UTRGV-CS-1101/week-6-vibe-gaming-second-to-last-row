@@ -114,10 +114,14 @@
 
                 // Rings
                 this.rings = [];
-                this.ringSpawnDelay = 3000; // 3 seconds
+                this.ringSpawnDelay = 3000; // base 3 seconds
+                this.baseRingSpawnDelay = 3000;
                 this.lastRingSpawn = 0;
                 this.ringsSpawned = 0;
-                this.maxRings = 100; // allow up to 100 rings
+                this.maxRings = 100; // allow up to 100 rings (soft cap)
+                this.collisionLimit = 30; // only run ring-to-ring collisions when under this
+                this.imageRenderThreshold = 50; // use images only when rings below this
+                this.maxRingSpeed = 16; // cap speed to avoid runaway
 
                 // Powerups
                 this.powerups = []; // {x,y,type,spawnTime}
@@ -198,9 +202,10 @@
             update() {
                 if (this.gameState === 'gameOver') return;
                 
-                // Spawn rings periodically up to maxRings
+                // Spawn rings periodically up to maxRings; slow spawn when crowded
                 const currentTime = Date.now();
-                if (currentTime - this.lastRingSpawn > this.ringSpawnDelay && this.rings.length < this.maxRings) {
+                const spawnDelay = Math.min(10000, this.baseRingSpawnDelay * (1 + this.rings.length / 40));
+                if (currentTime - this.lastRingSpawn > spawnDelay && this.rings.length < this.maxRings) {
                     this.spawnRing();
                     this.lastRingSpawn = currentTime;
                     this.ringsSpawned++;
@@ -269,8 +274,8 @@
                     x: Math.random() * (this.gameWidth - 60),
                     y: Math.random() * (this.gameHeight - 60),
                     radius: 30,
-                    // speed increases slightly and scales with total rings
-                    speed: 10 + Math.min(20, Math.floor(this.rings.length / 10)) + (this.ringsSpawned * 0.1),
+                    // speed increases slightly and scales with total rings, but capped
+                    speed: Math.min(this.maxRingSpeed, 8 + Math.floor(this.rings.length / 10) + (this.ringsSpawned * 0.05)),
                     dx: (Math.random() - 0.5) * 2, // Random direction
                     dy: (Math.random() - 0.5) * 2,
                     alpha: 0, // for fade-in
@@ -291,10 +296,12 @@
             }
             
             updateRings() {
-                // Check ring-to-ring collisions first
-                for (let i = 0; i < this.rings.length; i++) {
-                    for (let j = i + 1; j < this.rings.length; j++) {
-                        this.checkRingCollision(this.rings[i], this.rings[j]);
+                // Check ring-to-ring collisions first (skip expensive checks when crowded)
+                if (this.rings.length <= this.collisionLimit) {
+                    for (let i = 0; i < this.rings.length; i++) {
+                        for (let j = i + 1; j < this.rings.length; j++) {
+                            this.checkRingCollision(this.rings[i], this.rings[j]);
+                        }
                     }
                 }
                 
@@ -413,10 +420,11 @@
             
             drawRings() {
                 this.ctx.lineWidth = 4;
+                const useImages = this.hawkImageLoaded && this.rings.length <= this.imageRenderThreshold;
                 for (let ring of this.rings) {
                     this.ctx.save();
                     this.ctx.globalAlpha = ring.alpha !== undefined ? ring.alpha : 1;
-                    if (this.hawkImageLoaded) {
+                    if (useImages) {
                         // draw the hawk image centered in the ring
                         const imgSize = ring.radius * 2.2;
                         this.ctx.drawImage(this.hawkImage, ring.x - imgSize/2, ring.y - imgSize/2, imgSize, imgSize);
@@ -426,8 +434,9 @@
                         this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
                         this.ctx.stroke();
                     } else {
+                        // simple circle drawing (faster)
                         this.ctx.beginPath();
-                        this.ctx.strokeStyle = 'rgba(255,0,0,1)';
+                        this.ctx.strokeStyle = 'rgba(255,0,0,0.9)';
                         this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
                         this.ctx.stroke();
                     }
