@@ -227,6 +227,8 @@
                 
                 // Draw rings
                 this.drawRings();
+                // Draw powerups
+                this.drawPowerups();
                 
                 // Draw player
                 this.drawPlayer();
@@ -382,13 +384,68 @@
             }
             
             drawRings() {
-                this.ctx.strokeStyle = '#ff0000';
                 this.ctx.lineWidth = 4;
-                
                 for (let ring of this.rings) {
                     this.ctx.beginPath();
+                    // Use alpha for fade-in
+                    this.ctx.save();
+                    this.ctx.globalAlpha = ring.alpha !== undefined ? ring.alpha : 1;
+                    this.ctx.strokeStyle = 'rgba(255,0,0,1)';
                     this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
                     this.ctx.stroke();
+                    this.ctx.restore();
+                }
+            }
+
+            // Powerup spawn
+            spawnPowerup() {
+                const types = ['life', 'shield'];
+                const type = types[Math.floor(Math.random() * types.length)];
+                const p = {
+                    x: 40 + Math.random() * (this.gameWidth - 80),
+                    y: 40 + Math.random() * (this.gameHeight - 80),
+                    type: type,
+                    spawnTime: Date.now(),
+                    pulse: 0
+                };
+                this.powerups.push(p);
+            }
+
+            updatePowerups() {
+                const now = Date.now();
+                for (let i = this.powerups.length - 1; i >= 0; i--) {
+                    const p = this.powerups[i];
+                    // expire after 12s
+                    if (now - p.spawnTime > 12000) {
+                        this.powerups.splice(i, 1);
+                        continue;
+                    }
+                    p.pulse += 0.05;
+                }
+            }
+
+            drawPowerups() {
+                for (let p of this.powerups) {
+                    this.ctx.save();
+                    const size = 18 + Math.sin(p.pulse) * 3;
+                    if (p.type === 'life') {
+                        this.ctx.fillStyle = '#2ecc71';
+                        this.ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.font = '12px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.fillText('+1', p.x, p.y + 4);
+                    } else if (p.type === 'shield') {
+                        this.ctx.fillStyle = '#3498db';
+                        this.ctx.beginPath();
+                        this.ctx.arc(p.x, p.y, size/2, 0, Math.PI*2);
+                        this.ctx.fill();
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.font = '12px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.fillText('S', p.x, p.y + 4);
+                    }
+                    this.ctx.restore();
                 }
             }
             
@@ -454,6 +511,9 @@
                 this.ctx.fillText(`Position: ${Math.round(this.player.x)}, ${Math.round(this.player.y)}`, 20, 30);
                 this.ctx.fillText(`Speed: ${this.player.speed}`, 20, 50);
                 this.ctx.fillText(`Rings: ${this.rings.length}/3`, 20, 70);
+                // Lives and shield
+                this.ctx.fillText(`Lives: ${this.lives}`, 20, 90);
+                this.ctx.fillText(`Shield: ${this.shieldUses}`, 20, 110);
                 
                 // Draw survival time
                 const currentTime = this.gameState === 'gameOver' ? this.gameEndTime : Date.now();
@@ -463,6 +523,49 @@
                 this.ctx.fillStyle = '#fff';
                 this.ctx.textAlign = 'right';
                 this.ctx.fillText(`Time: ${survivalTime}s`, this.gameWidth - 20, 30);
+
+                // Draw achievement bar on the right side
+                this.drawAchievementBar(survivalTime);
+
+                // Also draw powerup overlay counts
+                this.ctx.textAlign = 'left';
+                this.ctx.fillStyle = '#fff';
+                this.ctx.fillText(`Press W A S D to move`, 20, this.gameHeight - 20);
+            }
+
+            drawAchievementBar(survivalTime) {
+                const barWidth = 18;
+                const barHeight = 200;
+                const x = this.gameWidth - 40;
+                const y = 60;
+
+                // Background
+                this.ctx.fillStyle = 'rgba(255,255,255,0.1)';
+                this.ctx.fillRect(x, y, barWidth, barHeight);
+
+                // Fill amount based on time
+                const progress = Math.min(1, survivalTime / this.achievementTimeGoal);
+                const fillH = barHeight * progress;
+                this.ctx.fillStyle = '#f1c40f';
+                this.ctx.fillRect(x, y + (barHeight - fillH), barWidth, fillH);
+
+                // Markers for milestones
+                const milestones = [10, 30, 60];
+                this.ctx.fillStyle = '#fff';
+                this.ctx.font = '10px Arial';
+                this.ctx.textAlign = 'right';
+                for (let m of milestones) {
+                    const my = y + barHeight - (barHeight * Math.min(1, m / this.achievementTimeGoal));
+                    this.ctx.fillRect(x - 4, my, barWidth + 8, 1);
+                    if (survivalTime >= m && !this.achievementsUnlocked[m]) {
+                        this.achievementsUnlocked[m] = true;
+                    }
+                }
+
+                // Small legend
+                this.ctx.textAlign = 'center';
+                this.ctx.fillStyle = '#fff';
+                this.ctx.fillText('Achievements', x + barWidth/2, y - 8);
             }
             
             drawGameOver() {
