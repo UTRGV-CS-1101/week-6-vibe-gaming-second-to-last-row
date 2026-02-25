@@ -3,6 +3,14 @@ Add an extra life tablet
 Make the red dots fade in instead of instantly spawning
 
 Add an achievement bar on the right side 
+    -each achievement gives a buff
 
 Add a shield powerup that protects from one dot 
 
+Make the red dots have a picture of a hawk in them
+
+Make the red dots slightly faster
+
+Put more red dots into the game 
+
+Make the number of rings possible up to 20
