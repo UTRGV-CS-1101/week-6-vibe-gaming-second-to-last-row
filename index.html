@@ -94,7 +94,21 @@
                 this.gameState = 'playing'; // 'playing' or 'gameOver'
                 this.gameStartTime = Date.now();
                 this.gameEndTime = null;
-                
+                // Player resources
+                this.lives = 1;
+                this.shieldUses = 0;
+
+                // Powerups
+                this.powerups = [];
+                this.lastPowerupSpawn = 0;
+                this.powerupSpawnDelay = 15000;
+
+                // Achievements / progress bar
+                this.achievementTimeGoal = 60; // seconds
+                this.achievementsUnlocked = {};
+
+                // Rings control
+                this.maxRings = 30; // allow more rings (soft cap)
                 // Rings
                 this.rings = [];
                 this.ringSpawnDelay = 3000; // 3 seconds
@@ -164,11 +178,18 @@
             update() {
                 if (this.gameState === 'gameOver') return;
                 
-                // Spawn rings every 3 seconds
+                // Spawn rings periodically (allow more)
                 const currentTime = Date.now();
-                if (this.ringsSpawned < 3 && currentTime - this.gameStartTime > this.ringSpawnDelay * (this.ringsSpawned + 1)) {
+                if (this.ringsSpawned < this.maxRings && currentTime - this.lastRingSpawn > this.ringSpawnDelay) {
                     this.spawnRing();
                     this.ringsSpawned++;
+                    this.lastRingSpawn = currentTime;
+                }
+
+                // Spawn powerups occasionally
+                if (currentTime - this.lastPowerupSpawn > this.powerupSpawnDelay) {
+                    this.spawnPowerup();
+                    this.lastPowerupSpawn = currentTime;
                 }
                 
                 // Handle movement
@@ -206,10 +227,10 @@
                 
                 // Draw rings
                 this.drawRings();
-                
+                // Draw powerups
+                this.drawPowerups();
                 // Draw player
                 this.drawPlayer();
-                
                 // Draw UI
                 this.drawUI();
                 
@@ -224,13 +245,16 @@
                     x: Math.random() * (this.gameWidth - 60),
                     y: Math.random() * (this.gameHeight - 60),
                     radius: 30,
-                    speed: 8 + (this.ringsSpawned * 2), // Ring 1: 8, Ring 2: 10, Ring 3: 12
+                    // slightly faster, will scale a bit with rings
+                    speed: 9 + Math.min(12, Math.floor(this.rings.length / 5)),
                     dx: (Math.random() - 0.5) * 2, // Random direction
-                    dy: (Math.random() - 0.5) * 2
+                    dy: (Math.random() - 0.5) * 2,
+                    alpha: 0,
+                    alphaSpeed: 0.03
                 };
                 
                 // Normalize direction vector
-                const length = Math.sqrt(ring.dx * ring.dx + ring.dy * ring.dy);
+                const length = Math.sqrt(ring.dx * ring.dx + ring.dy * ring.dy) || 1;
                 ring.dx = (ring.dx / length) * ring.speed;
                 ring.dy = (ring.dy / length) * ring.speed;
                 
@@ -244,13 +268,15 @@
                         this.checkRingCollision(this.rings[i], this.rings[j]);
                     }
                 }
-                
+
                 // Update ring positions
                 for (let ring of this.rings) {
+                    // Fade in ring
+                    if (ring.alpha < 1) ring.alpha = Math.min(1, ring.alpha + ring.alphaSpeed);
                     // Move ring
                     ring.x += ring.dx;
                     ring.y += ring.dy;
-                    
+
                     // Bounce off walls
                     if (ring.x - ring.radius <= 0 || ring.x + ring.radius >= this.gameWidth) {
                         ring.dx = -ring.dx;
@@ -308,29 +334,59 @@
                 const playerCenterX = this.player.x + this.player.width / 2;
                 const playerCenterY = this.player.y + this.player.height / 2;
                 const playerRadius = Math.min(this.player.width, this.player.height) / 2;
-                
-                for (let ring of this.rings) {
+
+                // Rings collisions — handle shield and lives
+                for (let i = this.rings.length - 1; i >= 0; i--) {
+                    const ring = this.rings[i];
                     const distance = Math.sqrt(
                         Math.pow(playerCenterX - ring.x, 2) + 
                         Math.pow(playerCenterY - ring.y, 2)
                     );
-                    
+
                     if (distance < playerRadius + ring.radius) {
+                        if (this.shieldUses > 0) {
+                            this.shieldUses -= 1;
+                            this.rings.splice(i, 1);
+                            continue;
+                        }
+                        if (this.lives > 0) {
+                            this.lives -= 1;
+                            this.rings.splice(i, 1);
+                            // respawn center
+                            this.player.x = this.gameWidth / 2 - this.player.width/2;
+                            this.player.y = this.gameHeight / 2 - this.player.height/2;
+                            continue;
+                        }
                         this.gameState = 'gameOver';
                         this.gameEndTime = Date.now();
                         return;
                     }
                 }
+
+                // Powerup pickups
+                for (let i = this.powerups.length - 1; i >= 0; i--) {
+                    const p = this.powerups[i];
+                    const dx = playerCenterX - p.x;
+                    const dy = playerCenterY - p.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist < playerRadius + 12) {
+                        if (p.type === 'life') this.lives += 1;
+                        if (p.type === 'shield') this.shieldUses += 1;
+                        this.powerups.splice(i,1);
+                    }
+                }
             }
             
             drawRings() {
-                this.ctx.strokeStyle = '#ff0000';
                 this.ctx.lineWidth = 4;
-                
                 for (let ring of this.rings) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = ring.alpha !== undefined ? ring.alpha : 1;
                     this.ctx.beginPath();
+                    this.ctx.strokeStyle = 'rgba(255,0,0,0.95)';
                     this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
                     this.ctx.stroke();
+                    this.ctx.restore();
                 }
             }
             
@@ -347,6 +403,53 @@
                             this.ctx.fillRect(x, y, 2, 2);
                         }
                     }
+                }
+            }
+
+            // Powerup handling
+            spawnPowerup() {
+                const types = ['life','shield'];
+                const type = types[Math.floor(Math.random()*types.length)];
+                this.powerups.push({
+                    x: 40 + Math.random()*(this.gameWidth-80),
+                    y: 40 + Math.random()*(this.gameHeight-80),
+                    type: type,
+                    spawnTime: Date.now(),
+                    pulse: 0
+                });
+            }
+
+            updatePowerups() {
+                const now = Date.now();
+                for (let i = this.powerups.length-1;i>=0;i--) {
+                    const p = this.powerups[i];
+                    if (now - p.spawnTime > 12000) { this.powerups.splice(i,1); continue; }
+                    p.pulse += 0.05;
+                }
+            }
+
+            drawPowerups() {
+                for (let p of this.powerups) {
+                    this.ctx.save();
+                    const size = 18 + Math.sin(p.pulse)*3;
+                    if (p.type === 'life') {
+                        this.ctx.fillStyle = '#2ecc71';
+                        this.ctx.fillRect(p.x - size/2, p.y - size/2, size, size);
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.font = '12px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.fillText('+1', p.x, p.y + 4);
+                    } else {
+                        this.ctx.fillStyle = '#3498db';
+                        this.ctx.beginPath();
+                        this.ctx.arc(p.x, p.y, size/2, 0, Math.PI*2);
+                        this.ctx.fill();
+                        this.ctx.fillStyle = '#fff';
+                        this.ctx.font = '12px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.fillText('S', p.x, p.y + 4);
+                    }
+                    this.ctx.restore();
                 }
             }
             
@@ -395,7 +498,9 @@
                 this.ctx.textAlign = 'left';
                 this.ctx.fillText(`Position: ${Math.round(this.player.x)}, ${Math.round(this.player.y)}`, 20, 30);
                 this.ctx.fillText(`Speed: ${this.player.speed}`, 20, 50);
-                this.ctx.fillText(`Rings: ${this.rings.length}/3`, 20, 70);
+                this.ctx.fillText(`Rings: ${this.rings.length}/${this.maxRings}`, 20, 70);
+                this.ctx.fillText(`Lives: ${this.lives}`, 20, 90);
+                this.ctx.fillText(`Shield: ${this.shieldUses}`, 20, 110);
                 
                 // Draw survival time
                 const currentTime = this.gameState === 'gameOver' ? this.gameEndTime : Date.now();
@@ -405,6 +510,42 @@
                 this.ctx.fillStyle = '#fff';
                 this.ctx.textAlign = 'right';
                 this.ctx.fillText(`Time: ${survivalTime}s`, this.gameWidth - 20, 30);
+                // achievement bar
+                this.drawAchievementBar(survivalTime);
+            }
+
+            drawAchievementBar(survivalTime) {
+                const barWidth = 18;
+                const barHeight = 200;
+                const x = this.gameWidth - 40;
+                const y = 60;
+                this.ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                this.ctx.fillRect(x, y, barWidth, barHeight);
+                const progress = Math.min(1, survivalTime / this.achievementTimeGoal);
+                const fillH = barHeight * progress;
+                this.ctx.fillStyle = '#f1c40f';
+                this.ctx.fillRect(x, y + (barHeight - fillH), barWidth, fillH);
+                // milestones
+                const milestones = [10,30,60];
+                this.ctx.fillStyle = '#fff';
+                this.ctx.font = '10px Arial';
+                this.ctx.textAlign = 'right';
+                for (let m of milestones) {
+                    const my = y + barHeight - (barHeight * Math.min(1, m / this.achievementTimeGoal));
+                    this.ctx.fillRect(x - 4, my, barWidth + 8, 1);
+                    if (survivalTime >= m && !this.achievementsUnlocked[m]) {
+                        this.applyAchievementBuff(m);
+                        this.achievementsUnlocked[m] = true;
+                    }
+                }
+                this.ctx.textAlign = 'center';
+                this.ctx.fillText('Achievements', x + barWidth/2, y - 8);
+            }
+
+            applyAchievementBuff(m) {
+                if (m === 10) this.player.speed += 1;
+                if (m === 30) this.lives += 1;
+                if (m === 60) this.shieldUses += 1;
             }
             
             drawGameOver() {
