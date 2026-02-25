@@ -104,6 +104,7 @@
                 this.ringSpawnDelay = 3000; // 3 seconds
                 this.lastRingSpawn = 0;
                 this.ringsSpawned = 0;
+                this.maxRings = 100; // allow up to 100 rings
 
                 // Powerups
                 this.powerups = []; // {x,y,type,spawnTime}
@@ -128,6 +129,13 @@
                     this.player.imageLoaded = false;
                 };
                 this.player.image.src = 'weasel.png';
+
+                // Load hawk sprite for rings
+                this.hawkImage = new Image();
+                this.hawkImageLoaded = false;
+                this.hawkImage.onload = () => { this.hawkImageLoaded = true; };
+                this.hawkImage.onerror = () => { this.hawkImageLoaded = false; };
+                this.hawkImage.src = 'hawk.png';
                 
                 // Set up event listeners
                 this.setupInputHandlers();
@@ -177,10 +185,11 @@
             update() {
                 if (this.gameState === 'gameOver') return;
                 
-                // Spawn rings every 3 seconds
+                // Spawn rings periodically up to maxRings
                 const currentTime = Date.now();
-                if (this.ringsSpawned < 3 && currentTime - this.gameStartTime > this.ringSpawnDelay * (this.ringsSpawned + 1)) {
+                if (currentTime - this.lastRingSpawn > this.ringSpawnDelay && this.rings.length < this.maxRings) {
                     this.spawnRing();
+                    this.lastRingSpawn = currentTime;
                     this.ringsSpawned++;
                 }
 
@@ -247,17 +256,23 @@
                     x: Math.random() * (this.gameWidth - 60),
                     y: Math.random() * (this.gameHeight - 60),
                     radius: 30,
-                    speed: 8 + (this.ringsSpawned * 2), // Ring 1: 8, Ring 2: 10, Ring 3: 12
+                    // speed increases slightly and scales with total rings
+                    speed: 10 + Math.min(20, Math.floor(this.rings.length / 10)) + (this.ringsSpawned * 0.1),
                     dx: (Math.random() - 0.5) * 2, // Random direction
                     dy: (Math.random() - 0.5) * 2,
                     alpha: 0, // for fade-in
-                    alphaSpeed: 0.02
+                    alphaSpeed: 0.04
                 };
                 
                 // Normalize direction vector
-                const length = Math.sqrt(ring.dx * ring.dx + ring.dy * ring.dy);
-                ring.dx = (ring.dx / length) * ring.speed;
-                ring.dy = (ring.dy / length) * ring.speed;
+                let length = Math.sqrt(ring.dx * ring.dx + ring.dy * ring.dy);
+                if (length === 0) {
+                    ring.dx = ring.speed;
+                    ring.dy = 0;
+                } else {
+                    ring.dx = (ring.dx / length) * ring.speed;
+                    ring.dy = (ring.dy / length) * ring.speed;
+                }
                 
                 this.rings.push(ring);
             }
@@ -386,13 +401,23 @@
             drawRings() {
                 this.ctx.lineWidth = 4;
                 for (let ring of this.rings) {
-                    this.ctx.beginPath();
-                    // Use alpha for fade-in
                     this.ctx.save();
                     this.ctx.globalAlpha = ring.alpha !== undefined ? ring.alpha : 1;
-                    this.ctx.strokeStyle = 'rgba(255,0,0,1)';
-                    this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
-                    this.ctx.stroke();
+                    if (this.hawkImageLoaded) {
+                        // draw the hawk image centered in the ring
+                        const imgSize = ring.radius * 2.2;
+                        this.ctx.drawImage(this.hawkImage, ring.x - imgSize/2, ring.y - imgSize/2, imgSize, imgSize);
+                        // outline
+                        this.ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+                        this.ctx.beginPath();
+                        this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                    } else {
+                        this.ctx.beginPath();
+                        this.ctx.strokeStyle = 'rgba(255,0,0,1)';
+                        this.ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2);
+                        this.ctx.stroke();
+                    }
                     this.ctx.restore();
                 }
             }
@@ -510,7 +535,7 @@
                 this.ctx.textAlign = 'left';
                 this.ctx.fillText(`Position: ${Math.round(this.player.x)}, ${Math.round(this.player.y)}`, 20, 30);
                 this.ctx.fillText(`Speed: ${this.player.speed}`, 20, 50);
-                this.ctx.fillText(`Rings: ${this.rings.length}/3`, 20, 70);
+                this.ctx.fillText(`Rings: ${this.rings.length}/${this.maxRings}`, 20, 70);
                 // Lives and shield
                 this.ctx.fillText(`Lives: ${this.lives}`, 20, 90);
                 this.ctx.fillText(`Shield: ${this.shieldUses}`, 20, 110);
@@ -549,7 +574,7 @@
                 this.ctx.fillStyle = '#f1c40f';
                 this.ctx.fillRect(x, y + (barHeight - fillH), barWidth, fillH);
 
-                // Markers for milestones
+                // Markers for milestones and apply buffs when reached
                 const milestones = [10, 30, 60];
                 this.ctx.fillStyle = '#fff';
                 this.ctx.font = '10px Arial';
@@ -558,6 +583,7 @@
                     const my = y + barHeight - (barHeight * Math.min(1, m / this.achievementTimeGoal));
                     this.ctx.fillRect(x - 4, my, barWidth + 8, 1);
                     if (survivalTime >= m && !this.achievementsUnlocked[m]) {
+                        this.applyAchievementBuff(m);
                         this.achievementsUnlocked[m] = true;
                     }
                 }
@@ -566,6 +592,17 @@
                 this.ctx.textAlign = 'center';
                 this.ctx.fillStyle = '#fff';
                 this.ctx.fillText('Achievements', x + barWidth/2, y - 8);
+            }
+
+            applyAchievementBuff(milestone) {
+                // Apply a simple buff per milestone (only once)
+                if (milestone === 10) {
+                    this.player.speed += 1;
+                } else if (milestone === 30) {
+                    this.lives += 1;
+                } else if (milestone === 60) {
+                    this.shieldUses += 1;
+                }
             }
             
             drawGameOver() {
